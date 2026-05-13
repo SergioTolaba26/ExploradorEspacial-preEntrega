@@ -1,74 +1,37 @@
 ﻿using UnityEngine;
 using UnityEngine.InputSystem;
 
+
 public class Nave : MonoBehaviour
 {
-    private Rigidbody2D rb;
-    private Animator animator;
-    private AudioSource musicaSource;
+    private const float GRAVITY_NORMAL = 0.4f;
 
+    private Rigidbody2D rb;
     public bool EmpujeArriba { get; private set; }
     public bool Izquierda { get; private set; }
     public bool Derecha { get; private set; }
 
-    [Header("Combustible")]
-    [SerializeField] private float hidrogeno = 10f;
+    public static Nave Instancia { get; private set; }
 
-    [Header("Turbo")]
-    [SerializeField] private float velocidadTurbo = 3f;
+    private float hidrogeno = 10f;
+
+    public enum State
+    {
+        Volando,
+        Aterrizando,
+        Estrellado
+    }
+    private State estado = State.Volando;
+
 
     private void Awake()
     {
+        Instancia = this;
         rb = GetComponent<Rigidbody2D>();
-        animator = GetComponent<Animator>();
+        rb.gravityScale = 0f;
 
         rb.angularDrag = 3f;
         rb.drag = 0.5f;
-    }
-
-    private void Start()
-    {
-        InputSystem.onAfterUpdate += OnAfterInputUpdate;
-        GameObject musica = GameObject.Find("Musica");
-
-        if (musica != null)
-        {
-            musicaSource = musica.GetComponent<AudioSource>();
-        }
-    }
-
-    private void OnAfterInputUpdate()
-    {
-        if (Keyboard.current == null)
-        {
-            Debug.LogWarning("Keyboard sigue null después de update");
-        }
-    }
-
-    private void Update()
-    {
-        
-        if (hidrogeno > 0f)
-        {
-            EmpujeArriba = Input.GetKey(KeyCode.UpArrow);
-            Izquierda = Input.GetKey(KeyCode.LeftArrow);
-            Derecha = Input.GetKey(KeyCode.RightArrow);
-        }
-        else
-        {
-            EmpujeArriba = false;
-            Izquierda = false;
-            Derecha = false;
-        }
-
-        float velocidadActual = rb.velocity.magnitude;
-
-
-        bool turboActivo = EmpujeArriba && velocidadActual > velocidadTurbo && hidrogeno > 0f;
-
-        animator.SetBool("Turbo", turboActivo);
-
-        Debug.Log("Velocidad: " + velocidadActual);
     }
 
     private void FixedUpdate()
@@ -77,83 +40,53 @@ public class Nave : MonoBehaviour
         float torque = 20f;
         float velocidadMax = 5f;
 
-        Debug.Log("Hidrogeno: " + hidrogeno);
 
-        
+
+        EmpujeArriba = Keyboard.current.upArrowKey.isPressed;
+        Izquierda = Keyboard.current.leftArrowKey.isPressed;
+        Derecha = Keyboard.current.rightArrowKey.isPressed;
+
+        //Debug.Log(hidrogeno);
         if (hidrogeno <= 0f)
         {
+            EmpujeArriba = false;
+            Izquierda = false;
+            Derecha = false;
             return;
         }
 
-        
         if (EmpujeArriba)
         {
-            rb.AddForce(
-                (Vector2)transform.up *
-                empuje *
-                Time.deltaTime
-            );
-
+            rb.AddForce((Vector2)transform.up * empuje * Time.deltaTime);
             ConsumoHidrogeno();
+            rb.gravityScale = GRAVITY_NORMAL;
         }
 
-        
         if (Izquierda)
         {
-            rb.AddTorque(
-                torque *
-                Time.deltaTime
-            );
-
+            rb.AddTorque(torque * Time.deltaTime);
             ConsumoHidrogeno();
         }
-        
         else if (Derecha)
         {
-            rb.AddTorque(
-                -torque *
-                Time.deltaTime
-            );
-
+            rb.AddTorque(-torque * Time.deltaTime);
             ConsumoHidrogeno();
         }
 
-        
-        rb.velocity =
-            Vector2.ClampMagnitude(
-                rb.velocity,
-                velocidadMax
-            );
-
-        
-        if (rb.velocity.magnitude >= velocidadTurbo)
-        {
-            rb.drag = 0.1f;
-        }
-        else
-        {
-            rb.drag = 0.5f;
-        }
+        rb.velocity = Vector2.ClampMagnitude(rb.velocity, velocidadMax);
     }
+
 
     private void OnCollisionEnter2D(Collision2D choque)
     {
-        if (musicaSource != null)
-        {
-            musicaSource.Pause();
-            Invoke(nameof(ReanudarMusica), 2f);
-        }
         if (!choque.gameObject.TryGetComponent(out BaseAterrizaje baseAterrizaje))
         {
             Debug.Log("Choque con el Terreno");
             return;
         }
 
-        float inclinacion =
-            Vector2.Angle(transform.up, Vector2.up);
-
-        float velocidad =
-            Mathf.Abs(choque.relativeVelocity.y);
+        float inclinacion = Vector2.Angle(transform.up, Vector2.up);
+        float velocidad = Mathf.Abs(choque.relativeVelocity.y);
 
         int puntaje = 0;
 
@@ -178,44 +111,47 @@ public class Nave : MonoBehaviour
             return;
         }
 
-        float puntajeFinal =
-            puntaje *
-            baseAterrizaje.MultiplicadorPuntaje();
-
-        Debug.Log("Puntaje: " + puntajeFinal);
-    }
-
-    private void ConsumoHidrogeno()
-    {
-        float consumo = 1f;
-
-        hidrogeno -= consumo * Time.deltaTime;
-
-       
-        if (hidrogeno < 0f)
-        {
-            hidrogeno = 0f;
-        }
+        int puntajeFinal = Mathf.RoundToInt(puntaje * baseAterrizaje.MultiplicadorPuntaje());
+        Puntuacion.Instancia.SumarPuntos(puntajeFinal);
     }
 
     private void OnTriggerEnter2D(Collider2D collider2D)
     {
-        if (musicaSource != null)
+        Debug.Log("Trigger con: " + collider2D.name);
+
+        if (collider2D.TryGetComponent(out CargaH2 cargaH2))
         {
-            musicaSource.Pause();
-            Invoke(nameof(ReanudarMusica), 2f);
+            Debug.Log("Destruyendo H2");
+
+            hidrogeno += 5f;
+            Puntuacion.Instancia.SumarPuntos(5);
+            cargaH2.Destruite();
         }
-        if (collider2D.TryGetComponent(out Moneda moneda))
+    
+        if (collider2D.gameObject.TryGetComponent(out Moneda moneda))
         {
+            Puntuacion.Instancia.SumarPuntos(10);
             moneda.Recolectar();
         }
+
+    }
+    private void ConsumoHidrogeno()
+    {
+        float consumo = 1f;
+        hidrogeno -= consumo * Time.deltaTime;
+        Debug.Log("Hidrogeno: " + hidrogeno);
     }
 
-    private void ReanudarMusica()
+    public float ObtenerHidrogeno()
     {
-        if (musicaSource != null)
-        {
-            musicaSource.UnPause();
-        }
+        return hidrogeno;
+    }
+    public float ObtenerVelocidadX()
+    {
+        return rb.velocity.x;
+    }
+    public float ObtenerVelocidadY()
+    {
+        return rb.velocity.y;
     }
 }
